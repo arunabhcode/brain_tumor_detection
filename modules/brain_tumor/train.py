@@ -204,7 +204,7 @@ class PatchEmbeddingFull(torch.nn.Module):
     """
 
     def __init__(self, in_channels=3, out_channels=768, patch_size=(16, 16)):
-        super(PatchEmbedding, self).__init__()
+        super(PatchEmbeddingFull, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.patch_size = patch_size
@@ -271,12 +271,13 @@ class PositionEmbedding(torch.nn.Module):
         x = x + self.pe[:, : x.size(1)]
         return x
 
+
 class SelfAttention(torch.nn.Module):
     """
     Class for the self attention layer.
     """
 
-    def __init__(self, embed_dim=768//12):
+    def __init__(self, embed_dim=768 // 12):
         super(SelfAttention, self).__init__()
         self.embed_dim = embed_dim
         self.W_q = torch.nn.Linear(embed_dim, embed_dim)
@@ -288,8 +289,10 @@ class SelfAttention(torch.nn.Module):
         q = self.W_q(x)
         k = self.W_k(x)
         v = self.W_v(x)
-        attention = v @ torch.softmax((k.transpose(1, 2) @ q) / np.sqrt(self.embed_dim))
+        attention_weights = torch.softmax((q @ k.transpose(1, 2)) / np.sqrt(self.embed_dim), dim=-1)
+        attention = attention_weights @ v
         return attention
+
 
 class MultiHeadAttention(torch.nn.Module):
     """
@@ -300,7 +303,7 @@ class MultiHeadAttention(torch.nn.Module):
         super(MultiHeadAttention, self).__init__()
         # instatiate a list of self attention layers
         self.self_attention_layers = torch.nn.ModuleList(
-            [SelfAttention(embed_dim//num_heads) for _ in range(num_heads)]
+            [SelfAttention(embed_dim // num_heads) for _ in range(num_heads)]
         )
         self.num_heads = num_heads
         self.embed_dim = embed_dim
@@ -309,46 +312,78 @@ class MultiHeadAttention(torch.nn.Module):
     def forward(self, x):
         # x shape: (batch_size, seq_length, embed_dim)
         batch_size, seq_length, _ = x.shape
-        
+
         # Split embedding dim into num_heads pieces
         head_dim = self.embed_dim // self.num_heads
         x_split = x.reshape(batch_size, seq_length, self.num_heads, head_dim)
-        
+
         # Process each head separately through attention layers
         head_outputs = []
         for i, layer in enumerate(self.self_attention_layers):
             head_i = x_split[:, :, i, :]  # Get i-th head
-            head_output = layer(head_i)    # Apply attention
+            head_output = layer(head_i)  # Apply attention
             head_outputs.append(head_output)
-        
+
         # Concatenate all head outputs
         concat_heads = torch.cat(head_outputs, dim=-1)
-        
+
         # Apply output projection
         output = self.W_o(concat_heads)
-        
+
         return output
 
-# TODO: Implement two approaches of multi head attention, one with separate attention and multi head attention and one with all in one
+
+class FeedForward(torch.nn.Module):
+    """
+    Class for the feed forward layer.
+    """
+
+    def __init__(self, embed_dim=768, dropout=0.1):
+        super(FeedForward, self).__init__()
+        self.fc1 = torch.nn.Linear(embed_dim, embed_dim * 4)
+        self.fc2 = torch.nn.Linear(embed_dim * 4, embed_dim)
+        self.relu = torch.nn.ReLU()
+        self.dropout = torch.nn.Dropout(dropout)
+
+    def forward(self, x):
+        # Define the forward pass
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
+        x = self.dropout(x)
+        return x
+
+
+# TODO: Implement one more approach of multi head attention with all in one multiplications instead of separate Attention layers
 # TODO: Implement the complete Encoder block
 # Training and testing the model
 
-# class VisionTransformer(torch.nn.Module):
-#     """
-#     Class for the Vision Transformer model.
-#     """
 
-#     def __init__(self, seq_length=14, num_classes=2):
-#         super(VisionTransformer, self).__init__()
-#         # Define y
-#         #
-#         # our Vision Transformer architecture here
-#         self.embedding_dim = 768
-#         self.n_heads = 12
+class ViTEncoder(torch.nn.Module):
+    """
+    Class for the Vision Transformer Encoder model with a classification head.
+    """
 
-#     def forward(self, x):
-#         # Define the forward pass
-#         pass
+    def __init__(self, seq_length=14, embed_dim=768, num_heads=12, num_classes=2):
+        super(ViTEncoder, self).__init__()
+        self.patch_embedding = PatchEmbedding()
+        self.position_embedding = PositionEmbedding(seq_length, embed_dim)
+        self.multi_head_attention = MultiHeadAttention(seq_length, embed_dim, num_heads)
+        self.feed_forward = FeedForward(embed_dim)
+        self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
+        self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
+        self.classifier = torch.nn.Linear(embed_dim, num_classes)
+
+    def forward(self, x):
+        x_with_pos = self.patch_embedding(x) + self.position_embedding(self.patch_embedding(x))
+        attn_output = self.multi_head_attention(self.layer_norm1(x_with_pos))
+        x = x_with_pos + attn_output
+        ff_output = self.feed_forward(self.layer_norm2(x))
+        encoded_output = x + ff_output
+        mean_output = encoded_output.mean(dim=1)
+        logits = self.classifier(mean_output)
+        return logits
 
 
 # # Example usage
