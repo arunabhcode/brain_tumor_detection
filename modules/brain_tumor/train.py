@@ -6,6 +6,29 @@ import os
 import torch
 import cv2
 import numpy as np
+import sys
+import inspect
+import builtins as __builtins__  # Use a different name to avoid conflict
+
+
+# --- Custom Print Function ---
+def custom_print(*args, **kwargs):
+    """Custom print function that includes filename and line number."""
+    # Get the frame of the caller
+    frame = inspect.currentframe().f_back
+    filename = os.path.basename(frame.f_code.co_filename)
+    lineno = frame.f_lineno
+
+    # Format the prefix
+    prefix = f"[{filename}:{lineno}]"
+
+    # Call the original print function with the prefix
+    __builtins__.print(prefix, *args, **kwargs)
+
+
+# Overload the built-in print
+print = custom_print
+# --- End Custom Print Function ---
 
 
 class FilesystemUtils:
@@ -36,6 +59,13 @@ class FilesystemUtils:
         """
         self.data_dir = os.path.join(self.get_repo_root(), "data")
         return self.data_dir
+
+    def get_model_dir(self):
+        """
+        Get the model directory.
+        """
+        self.model_dir = os.path.join(self.get_repo_root(), "bin")
+        return self.model_dir
 
     def get_data_files(self):
         """
@@ -90,7 +120,7 @@ class ImageProcessingUtils:
         Patch and stack an image.
         """
         # Get the dimensions of the image
-        h, w, c = image.shape
+        c, h, w = image.shape
 
         # Calculate the number of patches
         n_patches_h = h // patch_size[0]
@@ -101,10 +131,11 @@ class ImageProcessingUtils:
         for i in range(n_patches_h):
             for j in range(n_patches_w):
                 patch = image[
+                    :,
                     i * patch_size[0] : (i + 1) * patch_size[0],
                     j * patch_size[1] : (j + 1) * patch_size[1],
-                ]
-                patches.append(patch.flatten())
+                ].flatten()
+                patches.append(patch)
 
         # Stack patches
         stacked_patches = np.array(patches).reshape(
@@ -154,7 +185,7 @@ class DatasetUtils:
                 # Create label (0 if no tumor, 1 if tumor)
                 label = 0 if "notumor" in img_path.lower() else 1
 
-                return image, label
+                return patch_image_tensor, label
 
         return BrainTumorDataset
 
@@ -238,6 +269,7 @@ class PatchEmbedding(torch.nn.Module):
         )
 
     def forward(self, x):
+        # print(x.shape)
         # Define the forward pass
         x = self.embed_matrix(x)
         return x
@@ -368,16 +400,25 @@ class ViTEncoderMean(torch.nn.Module):
     Uses MEAN POOLING of output tokens for classification.
     """
 
-    def __init__(self, seq_length=196, embed_dim=768, num_heads=12, num_classes=2, patch_input_dim=768):
+    def __init__(
+        self,
+        seq_length=196,
+        embed_dim=768,
+        num_heads=12,
+        num_classes=2,
+        patch_input_dim=768,
+    ):
         super(ViTEncoderMean, self).__init__()
         # Note: This assumes input x to forward is already patch-embedded and flattened (B, num_patches, patch_input_dim)
-        self.patch_embedding = PatchEmbedding(in_channels=patch_input_dim, out_channels=embed_dim)
+        self.patch_embedding = PatchEmbedding(
+            in_channels=patch_input_dim, out_channels=embed_dim
+        )
         self.position_embedding = PositionEmbedding(seq_length, embed_dim)
         self.multi_head_attention = MultiHeadAttention(seq_length, embed_dim, num_heads)
         self.feed_forward = FeedForward(embed_dim)
         self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
         self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
-        self.classifier = torch.nn.Linear(embed_dim, num_classes)
+        self.classifier = torch.nn.Linear(embed_dim, 1)
 
     def forward(self, x):
         # x shape: (batch_size, num_patches, patch_input_dim)
@@ -403,8 +444,17 @@ class ViTEncoderCLS(torch.nn.Module):
     Input is expected to be an image tensor (B, C, H, W).
     """
 
-    def __init__(self, img_size=(224, 224), patch_size=(16, 16), in_channels=3, embed_dim=768, num_heads=12, num_classes=2, dropout=0.1):
-        super(ViTEncoder, self).__init__()
+    def __init__(
+        self,
+        img_size=(224, 224),
+        patch_size=(16, 16),
+        in_channels=3,
+        embed_dim=768,
+        num_heads=12,
+        num_classes=2,
+        dropout=0.1,
+    ):
+        super(ViTEncoderCLS, self).__init__()
         self.img_size = img_size
         self.patch_size = patch_size
         self.embed_dim = embed_dim
@@ -412,8 +462,10 @@ class ViTEncoderCLS(torch.nn.Module):
         self.num_classes = num_classes
 
         # Calculate number of patches
-        self.num_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
-        self.seq_length = self.num_patches + 1 # Add 1 for CLS token
+        self.num_patches = (img_size[0] // patch_size[0]) * (
+            img_size[1] // patch_size[1]
+        )
+        self.seq_length = self.num_patches + 1  # Add 1 for CLS token
 
         # Patch embedding (using Conv2D)
         self.patch_embedding = PatchEmbeddingFull(in_channels, embed_dim, patch_size)
@@ -426,7 +478,9 @@ class ViTEncoderCLS(torch.nn.Module):
 
         # Transformer Encoder parts
         self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
-        self.multi_head_attention = MultiHeadAttention(self.seq_length, embed_dim, num_heads)
+        self.multi_head_attention = MultiHeadAttention(
+            self.seq_length, embed_dim, num_heads
+        )
         self.dropout = torch.nn.Dropout(dropout)
         self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
         self.feed_forward = FeedForward(embed_dim, dropout)
@@ -439,7 +493,7 @@ class ViTEncoderCLS(torch.nn.Module):
 
     def _init_weights(self):
         # Initialize weights for linear layers and cls_token
-        torch.nn.init.normal_(self.cls_token, std=.02)
+        torch.nn.init.normal_(self.cls_token, std=0.02)
         # You might want more sophisticated initialization for other layers (e.g., Xavier/Kaiming for Conv/Linear)
 
     def forward(self, x):
@@ -477,17 +531,56 @@ class ViTEncoderCLS(torch.nn.Module):
         return logits
 
 
+NUM_EPOCHS = 10
+
+model = ViTEncoderMean()
+
+criterion = torch.nn.BCEWithLogitsLoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
 # # Example usage
-# fs_inst = FilesystemUtils()
-# dp_inst = ImageProcessingUtils()
-# data_files = fs_inst.get_data_files()
-# print(dp_inst.read_image(data_files[1]).shape)
+fs_inst = FilesystemUtils()
+dp_inst = ImageProcessingUtils()
+ds_utils = DatasetUtils(fs_inst, dp_inst, batch_size=16)
+train_loader, test_loader = ds_utils.create_dataloaders()
+print(f"Train batches: {len(train_loader)}, Test batches: {len(test_loader)}")
 
-# # Create dataset utils and dataloaders
-# ds_utils = DatasetUtils(fs_inst, dp_inst, batch_size=16)
-# train_loader, test_loader = ds_utils.create_dataloaders()
-# print(f"Train batches: {len(train_loader)}, Test batches: {len(test_loader)}")
+for epoch in range(NUM_EPOCHS):
+    model.train()  # Set the model to training mode
+    for i, (images, labels) in enumerate(train_loader):
 
-# if __name__ == "__main__":
-#     # Example usage
-#     pe_inst = PositionEmbedding(seq_length=2, embed_dim=4)
+        outputs = model(images)
+        labels = labels.float().unsqueeze(1)
+
+        loss = criterion(outputs, labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if (i + 1) % 10 == 0:
+            print(
+                "Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}".format(
+                    epoch + 1, NUM_EPOCHS, i + 1, len(train_loader), loss.item()
+                )
+            )
+
+    model.eval()  # Set the model to evaluation mode
+    # In test phase, we don't need to compute gradients (for memory efficiency)
+    with torch.no_grad():
+        correct = 0
+        total = 0
+        for images, labels in test_loader:
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+        print(
+            "Accuracy of the network on the test images: {} %".format(
+                100 * correct / total
+            )
+        )
+
+# Save the model checkpoint
+# torch.save(model.state_dict(), fs_inst.get_model_dir() + "/model.ckpt")
