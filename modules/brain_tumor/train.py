@@ -289,7 +289,9 @@ class SelfAttention(torch.nn.Module):
         q = self.W_q(x)
         k = self.W_k(x)
         v = self.W_v(x)
-        attention_weights = torch.softmax((q @ k.transpose(1, 2)) / np.sqrt(self.embed_dim), dim=-1)
+        attention_weights = torch.softmax(
+            (q @ k.transpose(1, 2)) / np.sqrt(self.embed_dim), dim=-1
+        )
         attention = attention_weights @ v
         return attention
 
@@ -360,14 +362,16 @@ class FeedForward(torch.nn.Module):
 # Training and testing the model
 
 
-class ViTEncoder(torch.nn.Module):
+class ViTEncoderMean(torch.nn.Module):
     """
     Class for the Vision Transformer Encoder model with a classification head.
+    Uses MEAN POOLING of output tokens for classification.
     """
 
-    def __init__(self, seq_length=14, embed_dim=768, num_heads=12, num_classes=2):
-        super(ViTEncoder, self).__init__()
-        self.patch_embedding = PatchEmbedding()
+    def __init__(self, seq_length=196, embed_dim=768, num_heads=12, num_classes=2, patch_input_dim=768):
+        super(ViTEncoderMean, self).__init__()
+        # Note: This assumes input x to forward is already patch-embedded and flattened (B, num_patches, patch_input_dim)
+        self.patch_embedding = PatchEmbedding(in_channels=patch_input_dim, out_channels=embed_dim)
         self.position_embedding = PositionEmbedding(seq_length, embed_dim)
         self.multi_head_attention = MultiHeadAttention(seq_length, embed_dim, num_heads)
         self.feed_forward = FeedForward(embed_dim)
@@ -376,13 +380,100 @@ class ViTEncoder(torch.nn.Module):
         self.classifier = torch.nn.Linear(embed_dim, num_classes)
 
     def forward(self, x):
-        x_with_pos = self.patch_embedding(x) + self.position_embedding(self.patch_embedding(x))
+        # x shape: (batch_size, num_patches, patch_input_dim)
+        embedded_x = self.patch_embedding(x)
+        x_with_pos = embedded_x + self.position_embedding(embedded_x)
+
+        # Pass through transformer encoder layers
         attn_output = self.multi_head_attention(self.layer_norm1(x_with_pos))
         x = x_with_pos + attn_output
         ff_output = self.feed_forward(self.layer_norm2(x))
         encoded_output = x + ff_output
+
+        # Perform classification using mean pooling
         mean_output = encoded_output.mean(dim=1)
         logits = self.classifier(mean_output)
+        return logits
+
+
+class ViTEncoderCLS(torch.nn.Module):
+    """
+    Class for the Vision Transformer Encoder model with a classification head.
+    Uses the standard [CLS] token approach for classification.
+    Input is expected to be an image tensor (B, C, H, W).
+    """
+
+    def __init__(self, img_size=(224, 224), patch_size=(16, 16), in_channels=3, embed_dim=768, num_heads=12, num_classes=2, dropout=0.1):
+        super(ViTEncoder, self).__init__()
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.num_classes = num_classes
+
+        # Calculate number of patches
+        self.num_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
+        self.seq_length = self.num_patches + 1 # Add 1 for CLS token
+
+        # Patch embedding (using Conv2D)
+        self.patch_embedding = PatchEmbeddingFull(in_channels, embed_dim, patch_size)
+
+        # CLS token
+        self.cls_token = torch.nn.Parameter(torch.zeros(1, 1, embed_dim))
+
+        # Positional embedding (for CLS token + patches)
+        self.position_embedding = PositionEmbedding(self.seq_length, embed_dim)
+
+        # Transformer Encoder parts
+        self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
+        self.multi_head_attention = MultiHeadAttention(self.seq_length, embed_dim, num_heads)
+        self.dropout = torch.nn.Dropout(dropout)
+        self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
+        self.feed_forward = FeedForward(embed_dim, dropout)
+
+        # Classification head
+        self.classifier = torch.nn.Linear(embed_dim, num_classes)
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        # Initialize weights for linear layers and cls_token
+        torch.nn.init.normal_(self.cls_token, std=.02)
+        # You might want more sophisticated initialization for other layers (e.g., Xavier/Kaiming for Conv/Linear)
+
+    def forward(self, x):
+        # x shape: (batch_size, in_channels, img_height, img_width)
+        batch_size = x.shape[0]
+
+        # 1. Patch Embedding
+        patches = self.patch_embedding(x)
+        patches = patches.flatten(2)
+        patches = patches.transpose(1, 2)
+
+        # 2. Prepend CLS token
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        tokens = torch.cat((cls_tokens, patches), dim=1)
+
+        # 3. Add Positional Embedding
+        tokens = self.position_embedding(tokens)
+
+        # 4. Transformer Encoder Block
+        # MHA + Dropout + Add & Norm
+        attn_input = self.layer_norm1(tokens)
+        attn_output = self.multi_head_attention(attn_input)
+        attn_output = self.dropout(attn_output)
+        x = tokens + attn_output
+
+        # FeedForward + Dropout + Add & Norm
+        ff_input = self.layer_norm2(x)
+        ff_output = self.feed_forward(ff_input)
+        encoded_output = x + ff_output
+
+        # 5. Classification
+        cls_output = encoded_output[:, 0]
+        logits = self.classifier(cls_output)
+
         return logits
 
 
@@ -397,6 +488,6 @@ class ViTEncoder(torch.nn.Module):
 # train_loader, test_loader = ds_utils.create_dataloaders()
 # print(f"Train batches: {len(train_loader)}, Test batches: {len(test_loader)}")
 
-if __name__ == "__main__":
-    # Example usage
-    pe_inst = PositionEmbedding(seq_length=2, embed_dim=4)
+# if __name__ == "__main__":
+#     # Example usage
+#     pe_inst = PositionEmbedding(seq_length=2, embed_dim=4)
