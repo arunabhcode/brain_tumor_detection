@@ -12,22 +12,29 @@ import builtins as __builtins__  # Use a different name to avoid conflict
 
 
 # --- Custom Print Function ---
-def custom_print(*args, **kwargs):
-    """Custom print function that includes filename and line number."""
-    # Get the frame of the caller
-    frame = inspect.currentframe().f_back
-    filename = os.path.basename(frame.f_code.co_filename)
-    lineno = frame.f_lineno
+class LoggingUtils:
+    def __init__(self):
+        # Store the original print function
+        self.original_print = __builtins__.print
 
-    # Format the prefix
-    prefix = f"[{filename}:{lineno}]"
+    def custom_print(self, *args, **kwargs):
+        """Custom print function that includes filename and line number."""
+        # Get the frame of the caller
+        frame = inspect.currentframe().f_back
+        filename = os.path.basename(frame.f_code.co_filename)
+        lineno = frame.f_lineno
 
-    # Call the original print function with the prefix
-    __builtins__.print(prefix, *args, **kwargs)
+        # Format the prefix
+        prefix = f"[{filename}:{lineno}]"
 
+        # Call the original print function with the prefix
+        self.original_print(prefix, *args, **kwargs)
+
+# Instantiate the logger
+logger = LoggingUtils()
 
 # Overload the built-in print
-print = custom_print
+print = logger.custom_print
 # --- End Custom Print Function ---
 
 
