@@ -271,6 +271,63 @@ class PositionEmbedding(torch.nn.Module):
         x = x + self.pe[:, : x.size(1)]
         return x
 
+class SelfAttention(torch.nn.Module):
+    """
+    Class for the self attention layer.
+    """
+
+    def __init__(self, embed_dim=768//12):
+        super(SelfAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.W_q = torch.nn.Linear(embed_dim, embed_dim)
+        self.W_k = torch.nn.Linear(embed_dim, embed_dim)
+        self.W_v = torch.nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        # Define the forward pass
+        q = self.W_q(x)
+        k = self.W_k(x)
+        v = self.W_v(x)
+        attention = v @ torch.softmax((k.transpose(1, 2) @ q) / np.sqrt(self.embed_dim))
+        return attention
+
+class MultiHeadAttention(torch.nn.Module):
+    """
+    Class for the multi head attention layer.
+    """
+
+    def __init__(self, seq_length=14, embed_dim=768, num_heads=12):
+        super(MultiHeadAttention, self).__init__()
+        # instatiate a list of self attention layers
+        self.self_attention_layers = torch.nn.ModuleList(
+            [SelfAttention(embed_dim//num_heads) for _ in range(num_heads)]
+        )
+        self.num_heads = num_heads
+        self.embed_dim = embed_dim
+        self.W_o = torch.nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_length, embed_dim)
+        batch_size, seq_length, _ = x.shape
+        
+        # Split embedding dim into num_heads pieces
+        head_dim = self.embed_dim // self.num_heads
+        x_split = x.reshape(batch_size, seq_length, self.num_heads, head_dim)
+        
+        # Process each head separately through attention layers
+        head_outputs = []
+        for i, layer in enumerate(self.self_attention_layers):
+            head_i = x_split[:, :, i, :]  # Get i-th head
+            head_output = layer(head_i)    # Apply attention
+            head_outputs.append(head_output)
+        
+        # Concatenate all head outputs
+        concat_heads = torch.cat(head_outputs, dim=-1)
+        
+        # Apply output projection
+        output = self.W_o(concat_heads)
+        
+        return output
 
 # TODO: Implement two approaches of multi head attention, one with separate attention and multi head attention and one with all in one
 # TODO: Implement the complete Encoder block
