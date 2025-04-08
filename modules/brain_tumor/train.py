@@ -13,19 +13,6 @@ from dataset import DatasetUtils
 from vit import ViTEncoderMean, ViTEncoderCLS
 from filesystem import FilesystemUtils  # Added missing import
 
-# --- Removed LoggingUtils class ---
-# --- Removed FilesystemUtils class ---
-# --- Removed ImageProcessingUtils class ---
-# --- Removed DatasetUtils class and BrainTumorDataset inner class ---
-# --- Removed PatchEmbeddingFull class ---
-# --- Removed PatchEmbedding class ---
-# --- Removed PositionEmbedding class ---
-# --- Removed SelfAttention class ---
-# --- Removed MultiHeadAttention class ---
-# --- Removed FeedForward class ---
-# --- Removed ViTEncoderMean class ---
-# --- Removed ViTEncoderCLS class ---
-
 # --- Configuration ---
 IMG_SIZE = (224, 224)
 PATCH_SIZE = (16, 16)
@@ -56,16 +43,6 @@ model = ViTEncoderMean(
     dropout=DROPOUT,
 )
 
-# Option 2: ViTEncoderCLS (expects full image input)
-# model = ViTEncoderCLS(
-#     img_size=IMG_SIZE,
-#     patch_size=PATCH_SIZE,
-#     in_channels=IN_CHANNELS,
-#     embed_dim=EMBED_DIM,
-#     num_heads=NUM_HEADS,
-#     num_classes=NUM_CLASSES, # Adjust if using CrossEntropyLoss (needs 2 classes)
-#     dropout=DROPOUT
-# )
 
 # Loss function (Binary Cross Entropy with Logits is suitable for 1 output neuron)
 criterion = torch.nn.BCEWithLogitsLoss()
@@ -165,9 +142,8 @@ if model_save_dir:
         os.makedirs(model_save_dir)
         print(f"Created model directory: {model_save_dir}")
     model_save_path = os.path.join(model_save_dir, "vit_mean_brain_tumor.ckpt")
-    # torch.save(model.state_dict(), model_save_path)
-    # print(f"Model state dictionary saved to {model_save_path}")
-    print(f"INFO: Model saving is currently commented out.")
+    torch.save(model.state_dict(), model_save_path)
+    print(f"Model state dictionary saved to {model_save_path}")
 else:
     print("Could not determine model directory. Model not saved.")
 
