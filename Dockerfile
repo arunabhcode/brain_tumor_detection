@@ -4,13 +4,17 @@
 # This image tag inherently supports the Python version bundled with PyTorch 2.4, which includes 3.12[1].
 FROM pytorch/pytorch:2.4.0-cuda11.8-cudnn9-runtime
 
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    ffmpeg
 
-# --- Optional: Install additional Python packages ---
-# Uncomment the following lines if you have a requirements.txt file
-# Copy requirements file first to leverage Docker cache
-# COPY requirements.txt .
+COPY requirements.txt .
 # Install dependencies
-# RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 CMD ["python", "/modules/brain_tumor/train.py"]
 

@@ -4,3 +4,4 @@ doxypypy
 sphinx
 numpydoc
 pylint
+opencv-python

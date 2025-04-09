@@ -33,9 +33,9 @@ class FilesystemUtils:
             # Stop if we have reached the filesystem root
             if parent_dir == current_dir:
                 print("Error: Could not find the repository root (.git folder).")
-                return None  # Or raise an exception
+                return "/"  # Or raise an exception
             current_dir = parent_dir
-        return None  # Should not be reached if .git is found
+        return "/"  # Should not be reached if .git is found
 
     def get_data_dir(self):
         """
