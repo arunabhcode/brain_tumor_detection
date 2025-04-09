@@ -1,0 +1,22 @@
+# docker-compose.yml
+
+version: '3.8' # Specify Compose file version
+
+services:
+  pytorch_service:
+    image: dl/brain_tumor:latest # Use the latest image from dl/brain_tumor
+    build: . # Build the image using the Dockerfile in the current directory
+    volumes:
+      - ./data:/data      # Mount local ./data directory to /data in the container[5]
+      - ./modules:/modules # Mount local ./modules directory to /modules in the container[5]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # Use 'all' available GPUs, or specify a count like 1, 2, etc.
+              capabilities: [gpu] # Request GPU capabilities
+    # Keep stdin open & allocate a pseudo-TTY to keep the container running interactively if needed
+    stdin_open: true
+    tty: true
+
