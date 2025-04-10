@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from logger import print  # Import custom print
 from embedding import PatchEmbedding, PositionEmbedding, PatchEmbeddingFull
-from attention import MultiHeadAttention
+from attention import MultiHeadAttention, MultiHeadAttentionQKVProjection
 from mlp import FeedForward
 
 
@@ -39,7 +39,7 @@ class ViTEncoderMean(torch.nn.Module):
 
         # Transformer Encoder Block components
         self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
-        self.multi_head_attention = MultiHeadAttention(embed_dim, num_heads)
+        self.multi_head_attention = MultiHeadAttentionQKVProjection(embed_dim, num_heads)
         self.dropout = torch.nn.Dropout(dropout)  # Added dropout after MHA and MLP
         self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
         self.feed_forward = FeedForward(embed_dim, dropout=dropout)
@@ -103,6 +103,7 @@ class ViTEncoderCLS(torch.nn.Module):
 
     def __init__(
         self,
+        num_patches=196,  # e.g., (224/16) * (224/16)
         img_size=(224, 224),
         patch_size=(16, 16),
         in_channels=3,
@@ -119,13 +120,13 @@ class ViTEncoderCLS(torch.nn.Module):
         self.num_classes = num_classes
 
         # Calculate number of patches
-        self.num_patches = (img_size[0] // patch_size[0]) * (
-            img_size[1] // patch_size[1]
-        )
+        self.num_patches = num_patches
         self.seq_length = self.num_patches + 1  # Add 1 for CLS token
 
         # Patch embedding (using Conv2D - PatchEmbeddingFull)
-        self.patch_embedding = PatchEmbeddingFull(in_channels, embed_dim, patch_size)
+        self.patch_embedding = PatchEmbedding(
+            in_channels=in_channels * patch_size[0] * patch_size[1], out_channels=embed_dim
+        )
 
         # CLS token (trainable parameter)
         self.cls_token = torch.nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -136,7 +137,7 @@ class ViTEncoderCLS(torch.nn.Module):
 
         # Transformer Encoder Block components
         self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
-        self.multi_head_attention = MultiHeadAttention(embed_dim, num_heads)
+        self.multi_head_attention = MultiHeadAttentionQKVProjection(embed_dim, num_heads)
         self.dropout = torch.nn.Dropout(dropout)
         self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
         self.feed_forward = FeedForward(embed_dim, dropout=dropout)

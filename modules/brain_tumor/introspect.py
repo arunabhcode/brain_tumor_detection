@@ -27,6 +27,7 @@ class Introspect:
             project=PROJECT_NAME,
             entity=ENTITY_NAME, 
             config=config_dict,
+            # mode="disabled",  # Set to "disabled" for offline mode
         )
 
     def finalize(self):
