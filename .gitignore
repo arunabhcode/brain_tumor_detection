@@ -173,6 +173,11 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Jpg files
 *.jpg
 
+# Data folder
 data/
+
+# Weights and biases
+wandb/

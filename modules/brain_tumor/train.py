@@ -81,7 +81,7 @@ model.to(device)
 for epoch in range(config_dict["NUM_EPOCHS"]):
     model.train()  # Set the model to training mode
     running_loss = 0.0
-    for i, (inputs, labels) in enumerate(train_loader):
+    for i, (inputs, _, labels) in enumerate(train_loader):
         # Skip potentially problematic batches (e.g., from dataset __getitem__ errors)
         if inputs is None or labels is None or -1 in labels:
             print(f"Skipping problematic batch {i}")
@@ -118,7 +118,7 @@ for epoch in range(config_dict["NUM_EPOCHS"]):
     correct = 0
     total = 0
     with torch.no_grad():  # No gradients needed for evaluation
-        for inputs, labels in test_loader:
+        for inputs, images, labels in test_loader:
             # Skip potentially problematic batches
             if inputs is None or labels is None or -1 in labels:
                 print(f"Skipping problematic test batch")
@@ -139,7 +139,7 @@ for epoch in range(config_dict["NUM_EPOCHS"]):
                 (predicted == labels.float()).sum().item()
             )  # Compare with float labels
             # Log image predictions
-            ist_inst.log_image_predictions(inputs, predicted, labels)
+            ist_inst.log_image_predictions(images, predicted, labels)
 
     accuracy = 100 * correct / total if total > 0 else 0
     ist_inst.log_accuracy(accuracy)  # Log accuracy

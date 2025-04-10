@@ -93,7 +93,7 @@ class DatasetUtils:
                 # Create label (0 if no tumor, 1 if tumor)
                 label = 0 if "notumor" in img_path.lower() else 1
 
-                return patch_image_tensor, label
+                return patch_image_tensor, image, label
 
         return BrainTumorDataset
 

@@ -5,7 +5,7 @@ import wandb
 from logger import print
 
 PROJECT_NAME = "brain-tumor"
-ENTITY_NAME = "gunshy-interview-co"
+ENTITY_NAME = "interview-co"
 
 class Introspect:
     """
@@ -16,6 +16,7 @@ class Introspect:
         """
         Initialize the introspection class.
         """
+        wandb.login()
         print("Introspect initialized")
 
     def initialize(self, config_dict=None):
@@ -58,12 +59,12 @@ class Introspect:
         """
         table = wandb.Table(columns=["Image", "Prediction", "Label"])
         for image, pred, label in zip(images, predictions, labels):
-            table.add_data(wandb.Image(image.numpy() * 255), pred, label)
+            table.add_data(wandb.Image(image.cpu().numpy() * 255), pred.cpu(), label.cpu())
         wandb.log({"predictions": table}, commit=False)
 
-    def log_model_summary(self):
+    def log_model_summary(self, model):
         """
         Log the model summary to Weights & Biases.
         """
-        wandb.watch(self.model, log="all", log_graph=True)
+        wandb.watch(model, log="all", log_graph=True)
     
