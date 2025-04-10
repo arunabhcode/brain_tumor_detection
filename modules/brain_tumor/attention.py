@@ -66,65 +66,93 @@ class MultiHeadAttention(torch.nn.Module):
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
 
-        # # Combine Q, K, V projections for efficiency
-        # self.qkv_proj = torch.nn.Linear(embed_dim, embed_dim * 3, bias=False)
-        # # Output projection
-        # self.out_proj = torch.nn.Linear(embed_dim, embed_dim, bias=False)
-
-        # --- Original Approach (using ModuleList of SelfAttention) --- #
-        # Kept for reference, but the combined projection is more standard.
         self.self_attention_layers = torch.nn.ModuleList(
             [SelfAttention(self.head_dim) for _ in range(num_heads)]
         )
         self.W_o = torch.nn.Linear(embed_dim, embed_dim)
-        # --- End Original Approach --- #
 
     def forward(self, x):
         # x shape: (batch_size, seq_length, embed_dim)
         batch_size, seq_length, _ = x.shape
 
-        # # --- Combined QKV Projection Approach --- #
-        # qkv = self.qkv_proj(x)  # (B, seq_length, embed_dim * 3)
-
-        # # Split into Q, K, V for each head
-        # qkv = qkv.reshape(batch_size, seq_length, self.num_heads, 3 * self.head_dim)
-        # qkv = qkv.permute(0, 2, 1, 3)  # (B, num_heads, seq_length, 3 * head_dim)
-        # q, k, v = qkv.chunk(3, dim=-1)  # Each is (B, num_heads, seq_length, head_dim)
-
-        # # Calculate attention scores (scaled dot-product)
-        # # (B, num_heads, seq_length, head_dim) @ (B, num_heads, head_dim, seq_length) -> (B, num_heads, seq_length, seq_length)
-        # attn_scores = torch.matmul(q, k.transpose(-2, -1)) / np.sqrt(self.head_dim)
-        # attention_weights = torch.softmax(
-        #     attn_scores, dim=-1
-        # )  # (B, num_heads, seq_length, seq_length)
-
-        # # Apply attention weights to V
-        # # (B, num_heads, seq_length, seq_length) @ (B, num_heads, seq_length, head_dim) -> (B, num_heads, seq_length, head_dim)
-        # attention_output = torch.matmul(attention_weights, v)
-
-        # # Reshape and combine heads
-        # attention_output = attention_output.permute(
-        #     0, 2, 1, 3
-        # )  # (B, seq_length, num_heads, head_dim)
-        # attention_output = attention_output.reshape(
-        #     batch_size, seq_length, self.embed_dim
-        # )  # (B, seq_length, embed_dim)
-
-        # # Apply output projection
-        # output = self.out_proj(attention_output)
-        # --- End Combined QKV Projection Approach --- #
-
-        # --- Original Approach Forward Pass --- #
         head_outputs = []
         x_split = x.reshape(batch_size, seq_length, self.num_heads, self.head_dim)
         for i, layer in enumerate(self.self_attention_layers):
-            head_i = x_split[:, :, i, :] # Get i-th head (B, seq_length, head_dim)
+            head_i = x_split[:, :, i, :]  # Get i-th head (B, seq_length, head_dim)
             head_output = layer(head_i)  # Apply attention (B, seq_length, head_dim)
             head_outputs.append(head_output)
         # Concatenate all head outputs -> (B, seq_length, embed_dim)
         concat_heads = torch.cat(head_outputs, dim=-1)
         # Apply output projection
         output = self.W_o(concat_heads)
-        # --- End Original Approach Forward Pass --- #
+
+        return output
+
+
+class MultiHeadAttentionQKVProjection(torch.nn.Module):
+    """
+    Class for the multi-head attention layer.
+    Input: (B, seq_length, embed_dim)
+    Output: (B, seq_length, embed_dim)
+    """
+
+    def __init__(self, embed_dim=768, num_heads=12):
+        super(MultiHeadAttentionQKVProjection, self).__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError(
+                f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
+            )
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+        # Combine Q, K, V projections for efficiency
+        self.qkv_proj = torch.nn.Linear(embed_dim, embed_dim * 3, bias=False)
+        # Output projection
+        self.out_proj = torch.nn.Linear(embed_dim, embed_dim, bias=False)
+
+    def forward(self, x):
+        """
+        What happens in the QKV projection approach is that we use a combined qkv layer where the output is the combined output of all three layers,
+        then we reshape and permute because in multi head attention, each head is supposed to independently process part of the data hence, the data should be of the shape
+        (B, seq_length, num_heads, 3*head.dim) since 3*embed_dim = 3*head_dim * num_heads, this is then permuted to (B, num_heads, seq_length, 3*head_dim) so that we can split it into Q, K and V corresponding to each head.
+        Then we do the attention calculation in a per head way, then it's permuted again so that we can switch seq_length and num_heads, this is done so that we can concatenate the heads together for the eventual output
+        of (B, seq_length, embed_dim) which is the same as the input shape.
+        """
+
+        # x shape: (batch_size, seq_length, embed_dim)
+        batch_size, seq_length, _ = x.shape
+
+        # --- Combined QKV Projection Approach --- #
+        qkv = self.qkv_proj(x)  # (B, seq_length, embed_dim * 3)
+
+        # Split into Q, K, V for each head
+        qkv = qkv.reshape(batch_size, seq_length, self.num_heads, 3 * self.head_dim)
+        qkv = qkv.permute(0, 2, 1, 3)  # (B, num_heads, seq_length, 3 * head_dim)
+        q, k, v = qkv.chunk(3, dim=-1)  # Each is (B, num_heads, seq_length, head_dim)
+
+        # Calculate attention scores (scaled dot-product)
+        # (B, num_heads, seq_length, head_dim) @ (B, num_heads, head_dim, seq_length) -> (B, num_heads, seq_length, seq_length)
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / np.sqrt(self.head_dim)
+        attention_weights = torch.softmax(
+            attn_scores, dim=-1
+        )  # (B, num_heads, seq_length, seq_length)
+
+        # Apply attention weights to V
+        # (B, num_heads, seq_length, seq_length) @ (B, num_heads, seq_length, head_dim) -> (B, num_heads, seq_length, head_dim)
+        attention_output = torch.matmul(attention_weights, v)
+
+        # Reshape and combine heads
+        attention_output = attention_output.permute(
+            0, 2, 1, 3
+        )  # (B, seq_length, num_heads, head_dim)
+        attention_output = attention_output.reshape(
+            batch_size, seq_length, self.embed_dim
+        )  # (B, seq_length, embed_dim)
+
+        # Apply output projection
+        output = self.out_proj(attention_output)
+        # --- End Combined QKV Projection Approach --- #
 
         return output
