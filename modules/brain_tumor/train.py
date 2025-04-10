@@ -10,24 +10,25 @@ import os
 from logger import print
 from preprocess import ImageProcessingUtils
 from dataset import DatasetUtils
-from vit import ViTEncoderMean, ViTEncoderCLS
+from vit import ViTEncoderMean
 from filesystem import FilesystemUtils  # Added missing import
-
+from introspect import Introspect  # Added missing import
 # --- Configuration ---
-IMG_SIZE = (224, 224)
-PATCH_SIZE = (16, 16)
-IN_CHANNELS = 3
-EMBED_DIM = 768  # Standard ViT-Base embedding dimension
-NUM_HEADS = 12  # Standard ViT-Base head count
-NUM_CLASSES = 1  # For BCEWithLogitsLoss, output is 1 logit
-DROPOUT = 0.1
-BATCH_SIZE = 16  # Reduced batch size from original example
-NUM_EPOCHS = 10
+config_dict = {}
+config_dict["IMG_SIZE"] = (224, 224)
+config_dict["PATCH_SIZE"] = (16, 16)
+config_dict["IN_CHANNELS"] = 3
+config_dict["EMBED_DIM"] = 768  # Standard ViT-Base embedding dimension
+config_dict["NUM_HEADS"] = 12  # Standard ViT-Base head count
+config_dict["NUM_CLASSES"] = 1  # For BCEWithLogitsLoss, output is 1 logit
+config_dict["DROPOUT"] = 0.1
+config_dict["BATCH_SIZE"] = 16  # Reduced batch size from original example
+config_dict["NUM_EPOCHS"] = 10
 
 # Determine patch input dimension and number of patches
-patch_h, patch_w = PATCH_SIZE
-img_h, img_w = IMG_SIZE
-patch_input_dim = patch_h * patch_w * IN_CHANNELS
+patch_h, patch_w = config_dict["PATCH_SIZE"]
+img_h, img_w = config_dict["IMG_SIZE"]
+patch_input_dim = patch_h * patch_w * config_dict["IN_CHANNELS"]
 num_patches = (img_h // patch_h) * (img_w // patch_w)
 
 # --- Model, Loss, Optimizer ---
@@ -37,10 +38,10 @@ num_patches = (img_h // patch_h) * (img_w // patch_w)
 model = ViTEncoderMean(
     num_patches=num_patches,
     patch_input_dim=patch_input_dim,
-    embed_dim=EMBED_DIM,
-    num_heads=NUM_HEADS,
-    num_classes=NUM_CLASSES,
-    dropout=DROPOUT,
+    embed_dim=config_dict["EMBED_DIM"],
+    num_heads=config_dict["NUM_HEADS"],
+    num_classes=config_dict["NUM_CLASSES"],
+    dropout=config_dict["DROPOUT"],
 )
 
 
@@ -53,9 +54,16 @@ optimizer = torch.optim.Adam(
 # --- Data Loading ---
 fs_inst = FilesystemUtils()
 dp_inst = ImageProcessingUtils()
-ds_utils = DatasetUtils(fs_inst, dp_inst, batch_size=BATCH_SIZE, img_size=IMG_SIZE)
+
+# Initial logging of model summary
+ist_inst = Introspect()
+ist_inst.initialize(config_dict=config_dict)
+ist_inst.log_model_summary(model)
+
+
+ds_utils = DatasetUtils(fs_inst, dp_inst, batch_size=config_dict["BATCH_SIZE"], img_size=config_dict["IMG_SIZE"])
 # Make sure DatasetUtils is initialized with consistent patch_size if needed
-# ds_utils.patch_size = PATCH_SIZE # Explicitly set if needed by DatasetUtils
+# ds_utils.patch_size = config_dict["PATCH_SIZE"] # Explicitly set if needed by DatasetUtils
 
 train_loader, test_loader = ds_utils.create_dataloaders()
 
@@ -70,7 +78,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 model.to(device)
 
-for epoch in range(NUM_EPOCHS):
+for epoch in range(config_dict["NUM_EPOCHS"]):
     model.train()  # Set the model to training mode
     running_loss = 0.0
     for i, (inputs, labels) in enumerate(train_loader):
@@ -96,9 +104,12 @@ for epoch in range(NUM_EPOCHS):
         optimizer.step()
 
         running_loss += loss.item()
+
+        ist_inst.log_training_loss(running_loss/(i + 1))  # Log average loss
+
         if (i + 1) % 10 == 0:  # Print every 10 batches
             print(
-                f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Step [{i + 1}/{len(train_loader)}], "
+                f"Epoch [{epoch + 1}/{config_dict['NUM_EPOCHS']}], Step [{i + 1}/{len(train_loader)}], "
                 f"Loss: {loss.item():.4f}, Avg Loss: {running_loss / (i + 1):.4f}"
             )
 
@@ -127,8 +138,11 @@ for epoch in range(NUM_EPOCHS):
             correct += (
                 (predicted == labels.float()).sum().item()
             )  # Compare with float labels
+            # Log image predictions
+            ist_inst.log_image_predictions(inputs, predicted, labels)
 
     accuracy = 100 * correct / total if total > 0 else 0
+    ist_inst.log_accuracy(accuracy)  # Log accuracy
     print(
         f"Epoch {epoch + 1} completed. "
         f"Accuracy on test images: {accuracy:.2f} % ({correct}/{total})"
@@ -148,3 +162,4 @@ else:
     print("Could not determine model directory. Model not saved.")
 
 print("Training finished.")
+ist_inst.finalize()
