@@ -3,10 +3,8 @@
 
 import torch
 import numpy as np
-from logger import print  # Import custom print
-from embedding import PatchEmbedding, PositionEmbedding, PatchEmbeddingFull
-from attention import MultiHeadAttention, MultiHeadAttentionQKVProjection
-from mlp import FeedForward
+from embedding import PatchEmbedding, PositionEmbedding
+from encoder import Encoder
 
 
 class ViTEncoderMean(torch.nn.Module):
@@ -37,12 +35,7 @@ class ViTEncoderMean(torch.nn.Module):
         # Positional embedding (Sinusoidal)
         self.position_embedding = PositionEmbedding(self.seq_length, embed_dim)
 
-        # Transformer Encoder Block components
-        self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
-        self.multi_head_attention = MultiHeadAttentionQKVProjection(embed_dim, num_heads)
-        self.dropout = torch.nn.Dropout(dropout)  # Added dropout after MHA and MLP
-        self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
-        self.feed_forward = FeedForward(embed_dim, dropout=dropout)
+        self.transformer_encoder = Encoder(embed_dim, num_heads, dropout)
 
         # Classification head (using mean pooling)
         self.classifier = torch.nn.Linear(embed_dim, num_classes)
@@ -62,30 +55,14 @@ class ViTEncoderMean(torch.nn.Module):
 
     def forward(self, x):
         # x shape: (batch_size, num_patches, patch_input_dim)
-        batch_size = x.shape[0]
-
         # 1. Patch + Position Embedding
         embedded_x = self.patch_embedding(x)  # (B, num_patches, embed_dim)
         # Note: PositionEmbedding expects (B, seq_len, embed_dim)
         # Need to ensure seq_len matches num_patches here.
         tokens = self.position_embedding(embedded_x)  # (B, num_patches, embed_dim)
 
-        # 2. Transformer Encoder Block
-        # MHA + Dropout + Add & Norm
-        attn_input = self.layer_norm1(tokens)
-        attn_output = self.multi_head_attention(
-            attn_input
-        )  # (B, num_patches, embed_dim)
-        attn_output = self.dropout(attn_output)
-        x = tokens + attn_output  # Residual connection
-
-        # FeedForward + Dropout + Add & Norm
-        ff_input = self.layer_norm2(x)
-        ff_output = self.feed_forward(ff_input)  # (B, num_patches, embed_dim)
-        # Note: Dropout is applied inside FeedForward in the provided mlp.py
-        encoded_output = (
-            x + ff_output
-        )  # Residual connection (B, num_patches, embed_dim)
+        # Call the transformer encoder on the tokens
+        encoded_output = self.transformer_encoder(tokens)
 
         # 3. Classification Head (Mean Pooling)
         mean_output = encoded_output.mean(dim=1)  # (B, embed_dim)
@@ -125,7 +102,8 @@ class ViTEncoderCLS(torch.nn.Module):
 
         # Patch embedding (using Conv2D - PatchEmbeddingFull)
         self.patch_embedding = PatchEmbedding(
-            in_channels=in_channels * patch_size[0] * patch_size[1], out_channels=embed_dim
+            in_channels=in_channels * patch_size[0] * patch_size[1],
+            out_channels=embed_dim,
         )
 
         # CLS token (trainable parameter)
@@ -136,11 +114,7 @@ class ViTEncoderCLS(torch.nn.Module):
         self.position_embedding = PositionEmbedding(self.seq_length, embed_dim)
 
         # Transformer Encoder Block components
-        self.layer_norm1 = torch.nn.LayerNorm(embed_dim)
-        self.multi_head_attention = MultiHeadAttentionQKVProjection(embed_dim, num_heads)
-        self.dropout = torch.nn.Dropout(dropout)
-        self.layer_norm2 = torch.nn.LayerNorm(embed_dim)
-        self.feed_forward = FeedForward(embed_dim, dropout=dropout)
+        self.transformer_encoder = Encoder(embed_dim, num_heads, dropout)
 
         # Classification head (takes the CLS token output)
         self.classifier = torch.nn.Linear(embed_dim, num_classes)
@@ -178,18 +152,10 @@ class ViTEncoderCLS(torch.nn.Module):
         # 3. Add Positional Embedding
         tokens = self.position_embedding(tokens)  # (B, seq_length, embed_dim)
 
-        # 4. Transformer Encoder Block
-        # MHA + Dropout + Add & Norm
-        attn_input = self.layer_norm1(tokens)
-        attn_output = self.multi_head_attention(attn_input)
-        attn_output = self.dropout(attn_output)
-        x = tokens + attn_output  # Residual connection
-
-        # FeedForward + Dropout + Add & Norm
-        ff_input = self.layer_norm2(x)
-        ff_output = self.feed_forward(ff_input)
-        # Dropout is applied inside FeedForward
-        encoded_output = x + ff_output  # Residual connection (B, seq_length, embed_dim)
+        # Call the transformer encoder on the tokens
+        encoded_output = self.transformer_encoder(
+            tokens
+        )  # Residual connection (B, seq_length, embed_dim)
 
         # 5. Classification
         cls_output = encoded_output[:, 0]  # Extract the CLS token output (B, embed_dim)
