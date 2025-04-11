@@ -181,3 +181,6 @@ data/
 
 # Weights and biases
 wandb/
+
+# PyTorch models
+*.ckpt

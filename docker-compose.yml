@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data:/data      # Mount local ./data directory to /data in the container[5]
       - ./modules:/modules # Mount local ./modules directory to /modules in the container[5]
+      - ./bin:/bin # Mount local ./modules directory to /modules in the container[5]
     deploy:
       resources:
         reservations:
