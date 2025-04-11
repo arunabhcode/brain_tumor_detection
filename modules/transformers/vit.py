@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import torch
-import numpy as np
 from embedding import PatchEmbedding, PositionEmbedding
 from encoder import Encoder
 
